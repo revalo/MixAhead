@@ -6,16 +6,33 @@ Imports MemoryScanner
 Imports System.Text
 Imports Open.WinKeyboardHook
 
-Public Class Form1
+Public Class Main
     Dim flValue As String
     Public mainOut As AsioOut
     Dim fragReader As FragmentWaveProvider
     Dim flScanner As MemoryScanner.MemoryScanner
     Dim kb As IKeyboardInterceptor
+    Dim renderBinName As String = "render"
+    Dim folder As String = ""
 
     Private Sub Form1_Load(sender As Object, e As EventArgs) Handles MyBase.Load
+        ' Delete and create folder
+        Try
+            If IO.Directory.Exists(renderBinName) Then
+                IO.Directory.Delete(renderBinName, True)
+            End If
+        Catch
+        End Try
+
+        Try
+            IO.Directory.CreateDirectory(renderBinName)
+        Catch
+        End Try
+
+        folder = My.Computer.FileSystem.GetDirectoryInfo(renderBinName).FullName
+
         ' Initialize our FL memory scanner
-        flScanner = New MemoryScanner.MemoryScanner(System.Diagnostics.Process.GetProcessesByName("FL64")(0))
+        InitializeFLConnection()
 
         ' Initialize poller thread
         Dim t As New Threading.Thread(AddressOf FlPollerThread)
@@ -43,9 +60,38 @@ Public Class Form1
         ' Start the HUD
         Selector_Display.Show()
     End Sub
+    Function InitializeFLConnection()
+        Dim flInstances As Process() = Diagnostics.Process.GetProcessesByName("FL64")
+        If flInstances.Length = 0 Then
+            connectionStatus.Text = "Disconnected from FL Studio"
+            Return False
+        Else
+            flScanner = New MemoryScanner.MemoryScanner(flInstances(0))
+            connectionStatus.Text = "Connected to FL Studio"
+            Return True
+        End If
+    End Function
+
+    Function IsFlConnected()
+        If IsNothing(flScanner) Then
+            Return False
+        ElseIf flScanner.process.HasExited = True Then
+            Return False
+        Else
+            Return True
+        End If
+    End Function
+
     Public flLiveStatus As String
     Sub FlPollerThread()
         Do
+            If IsFlConnected() = False Then
+                Me.Invoke(Sub()
+                              InitializeFLConnection()
+                          End Sub)
+                Threading.Thread.Sleep(1000)
+                Continue Do
+            End If
             Try
                 Dim res() As String = flScanner.ScanRegex("[0-9]*:[0-9]*:[0-9]* to [0-9]*:[0-9]*:[0-9][0-9]")
                 If res.Length > 0 Then
@@ -79,9 +125,8 @@ Public Class Form1
     Dim wavePoller As Threading.Thread
     ' TO-DO: Jank
     Public Function SetNewWav() As String
-        Dim folder As String = "C:\Users\shrey\Documents\Visual Studio 2012\Projects\MixAhead\MixAhead\bin\Debug\render\"
         Dim uuid As String = Guid.NewGuid().ToString()
-        waveToPoll = folder & uuid & ".wav"
+        waveToPoll = folder & "\" & uuid & ".wav"
 
         If Not wavePoller Is Nothing Then
             Try
@@ -96,7 +141,6 @@ Public Class Form1
 
         Return waveToPoll
     End Function
-
     Sub wavePollingThread()
         Do
             If IO.File.Exists(waveToPoll) And Not IsFileLocked(My.Computer.FileSystem.GetFileInfo(waveToPoll)) Then
@@ -112,8 +156,16 @@ Public Class Form1
         Loop
     End Sub
 
-    Private Sub Button1_Click(sender As Object, e As EventArgs) Handles Button1.Click
-        My.Computer.Clipboard.SetText(SetNewWav())
+    Private Sub Button1_Click(sender As Object, e As EventArgs)
+        If flValue.Contains(" to ") Then
+            Try
+                My.Computer.Clipboard.SetText(SetNewWav())
+            Catch ex As Exception
+                MsgBox("That didn't work.", MsgBoxStyle.OkOnly, "Naw")
+            End Try
+        Else
+            MsgBox("The timestamp is invalid!", MsgBoxStyle.OkOnly, "Naw")
+        End If
     End Sub
 
     Protected Overridable Function IsFileLocked(file As FileInfo) As Boolean
@@ -157,6 +209,16 @@ Public Class Form1
         End If
     End Sub
 
+    Private Sub VolumeSlider1_Load(sender As Object, e As EventArgs)
+
+    End Sub
+
+    Private Sub flConnectionTimer_Tick(sender As Object, e As EventArgs) Handles flConnectionTimer.Tick
+        If InitializeFLConnection() = False Then
+        Else
+            flConnectionTimer.Enabled = False
+        End If
+    End Sub
 End Class
 
 Public Class FragmentWaveProvider
@@ -168,7 +230,7 @@ Public Class FragmentWaveProvider
     Public wavef As WaveFormat
 
     Public Sub New()
-        Dim reader As New AudioFileReader("C:\Users\shrey\Documents\Visual Studio 2012\Projects\MixAhead\MixAhead\bin\Debug\render\ref.wav")
+        Dim reader As New AudioFileReader("ref.wav")
         wavef = reader.WaveFormat
     End Sub
 
@@ -179,6 +241,7 @@ Public Class FragmentWaveProvider
         Dim buffer(1) As Single
 
         Dim startSampleLocation As Long
+
         Dim endSampleLocation As Long
 
         Dim tokens As String() = flString.Split(" to ")
@@ -186,6 +249,8 @@ Public Class FragmentWaveProvider
         endSampleLocation = ConvertBSTToSamples(tokens(2), reader.WaveFormat)
 
         Dim currentInsertPosition As Integer = startSampleLocation
+
+        ' Refine search by searching near samples.
 
         If left Is Nothing Then
             ReDim left(endSampleLocation - 1)
@@ -216,7 +281,7 @@ Public Class FragmentWaveProvider
         s = s + 16 * b
         t = t + 24 * s
 
-        Dim secondsPerTick As Single = 0.0045833333
+        Dim secondsPerTick As Single = 30.0 / 6144.0
         Dim totalSeconds As Double = secondsPerTick * t
 
         Dim sample As Long = totalSeconds * wf.SampleRate
@@ -231,12 +296,17 @@ Public Class FragmentWaveProvider
     End Function
 
     Public Function Read(buffer() As Single, offset As Integer, count As Integer) As Integer
+        Dim startPos As Long = Position
         For n As Integer = 0 To count - 1 Step 2
-            buffer(n + offset) = CSng(left(Position))
-            buffer(n + offset + 1) = CSng(right(Position))
-            Position += 1
+            If Not Position >= left.Length Then
+                buffer(n + offset) = CSng(left(Position))
+                buffer(n + offset + 1) = CSng(right(Position))
+                Position += 1
+            Else
+                Exit For
+            End If
         Next
-        Return count
+        Return Position - startPos
     End Function
 
     Public ReadOnly Property Length As Long

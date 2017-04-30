@@ -39,7 +39,7 @@ namespace MemoryScanner
         [DllImport("kernel32.dll", SetLastError = true)]
         static extern int VirtualQueryEx(IntPtr hProcess, IntPtr lpAddress, out MEMORY_BASIC_INFORMATION lpBuffer, uint dwLength);
 
-        static Process process;
+        public Process process;
 
         // REQUIRED STRUCTS
         public struct MEMORY_BASIC_INFORMATION
