@@ -85,13 +85,6 @@ Public Class Main
     Public flLiveStatus As String
     Sub FlPollerThread()
         Do
-            If IsFlConnected() = False Then
-                Me.Invoke(Sub()
-                              InitializeFLConnection()
-                          End Sub)
-                Threading.Thread.Sleep(1000)
-                Continue Do
-            End If
             Try
                 Dim res() As String = flScanner.ScanRegex("[0-9]*:[0-9]*:[0-9]* to [0-9]*:[0-9]*:[0-9][0-9]")
                 If res.Length > 0 Then
@@ -170,7 +163,6 @@ Public Class Main
 
     Protected Overridable Function IsFileLocked(file As FileInfo) As Boolean
         Dim stream As FileStream = Nothing
-
         Try
             stream = file.Open(FileMode.Open, FileAccess.Read, FileShare.None)
         Catch generatedExceptionName As IOException
@@ -224,14 +216,16 @@ End Class
 Public Class FragmentWaveProvider
     Implements IWaveProvider
 
-    Public left As Double()
-    Public right As Double()
+    Public left As List(Of Double)
+    Public right As List(Of Double)
 
     Public wavef As WaveFormat
+    Public insertOffset As Long
 
     Public Sub New()
         Dim reader As New AudioFileReader("ref.wav")
         wavef = reader.WaveFormat
+        insertOffset = 0
     End Sub
 
     ' Main Function that takes in a file and a position in the FL Studio selector, and tries to merge it with the official audio.
@@ -241,33 +235,43 @@ Public Class FragmentWaveProvider
         Dim buffer(1) As Single
 
         Dim startSampleLocation As Long
-
         Dim endSampleLocation As Long
 
         Dim tokens As String() = flString.Split(" to ")
-        startSampleLocation = ConvertBSTToSamples(tokens(0), reader.WaveFormat)
-        endSampleLocation = ConvertBSTToSamples(tokens(2), reader.WaveFormat)
+        startSampleLocation = ConvertBSTToSamples(tokens(0), reader.WaveFormat) - insertOffset
+        endSampleLocation = ConvertBSTToSamples(tokens(2), reader.WaveFormat) - insertOffset
 
         Dim currentInsertPosition As Integer = startSampleLocation
 
-        ' Refine search by searching near samples.
-
         If left Is Nothing Then
-            ReDim left(endSampleLocation - 1)
-            ReDim right(endSampleLocation - 1)
-        ElseIf endSampleLocation >= left.Length Then
-            ReDim Preserve left(endSampleLocation - 1)
-            ReDim Preserve right(endSampleLocation - 1)
+            left = New List(Of Double)(endSampleLocation - 1)
+            right = New List(Of Double)(endSampleLocation - 1)
+        ElseIf endSampleLocation >= left.Capacity Then
+            left.Capacity = endSampleLocation - 1
+            right.Capacity = endSampleLocation - 1
         End If
 
         reader.Read(buffer, 0, buffer.Length)
 
         Dim bufferPosition As Long = 0
 
+        If currentInsertPosition < 0 Then
+            currentInsertPosition = 0
+        End If
+
         While reader.HasData(2) And currentInsertPosition < endSampleLocation
             reader.Read(buffer, 0, 2)
-            left(currentInsertPosition) = buffer(0)
-            right(currentInsertPosition) = buffer(1)
+            If currentInsertPosition < 0 Then
+                ' Skip
+            End If
+            If currentInsertPosition < left.Count Then
+                left(currentInsertPosition) = buffer(0)
+                right(currentInsertPosition) = buffer(1)
+            Else
+                left.Add(buffer(0))
+                right.Add(buffer(1))
+            End If
+           
 
             currentInsertPosition += 1
         End While
@@ -297,8 +301,9 @@ Public Class FragmentWaveProvider
 
     Public Function Read(buffer() As Single, offset As Integer, count As Integer) As Integer
         Dim startPos As Long = Position
+        Dim readPos As Long
         For n As Integer = 0 To count - 1 Step 2
-            If Not Position >= left.Length Then
+            If Not Position >= left.Count Then
                 buffer(n + offset) = CSng(left(Position))
                 buffer(n + offset + 1) = CSng(right(Position))
                 Position += 1
@@ -306,12 +311,22 @@ Public Class FragmentWaveProvider
                 Exit For
             End If
         Next
-        Return Position - startPos
+        readPos = Position
+
+        ' Trigger realloc
+        If Position > 1000000 Then
+            left.RemoveRange(0, Position)
+            right.RemoveRange(0, Position)
+            insertOffset += Position
+            Position = 0
+        End If
+
+        Return readPos - startPos
     End Function
 
     Public ReadOnly Property Length As Long
         Get
-            Return left.Length
+            Return left.Count
         End Get
     End Property
 
