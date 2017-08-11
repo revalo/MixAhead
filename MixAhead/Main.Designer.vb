@@ -44,7 +44,7 @@ Partial Class Main
         Me.MonitorOutput.FormattingEnabled = True
         Me.MonitorOutput.Location = New System.Drawing.Point(52, 24)
         Me.MonitorOutput.Name = "MonitorOutput"
-        Me.MonitorOutput.Size = New System.Drawing.Size(242, 30)
+        Me.MonitorOutput.Size = New System.Drawing.Size(242, 25)
         Me.MonitorOutput.TabIndex = 0
         '
         'Button2
@@ -91,6 +91,7 @@ Partial Class Main
         Me.Controls.Add(Me.PictureBox1)
         Me.Controls.Add(Me.Button2)
         Me.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog
+        Me.Icon = CType(resources.GetObject("$this.Icon"), System.Drawing.Icon)
         Me.MaximizeBox = False
         Me.Name = "Main"
         Me.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen

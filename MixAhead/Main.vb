@@ -50,6 +50,8 @@ Public Class Main
             InitializeAudio()
         End If
 
+        ' Let there be no race conditions
+
         ' Initialize keyboard hook
         kb = New KeyboardInterceptor()
         AddHandler kb.KeyDown, AddressOf GlobalKeyDown
@@ -87,6 +89,7 @@ Public Class Main
         Do
             Try
                 Dim res() As String = flScanner.ScanRegex("[0-9]*:[0-9]*:[0-9]* to [0-9]*:[0-9]*:[0-9][0-9]")
+                Console.WriteLine(res.Length)
                 If res.Length > 0 Then
                     flValue = res(0)
                     flLiveStatus = res(0)
@@ -110,7 +113,7 @@ Public Class Main
         Try
             mainOut = New AsioOut(MonitorOutput.SelectedItem.ToString())
         Catch ex As Exception
-
+            MsgBox(ex.Message)
         End Try
     End Sub
 
@@ -142,7 +145,6 @@ Public Class Main
                     mainOut.Init(fragReader)
                     mainOut.Play()
                 End If
-
                 Exit Do
             End If
             Threading.Thread.Sleep(1000)
@@ -241,6 +243,8 @@ Public Class FragmentWaveProvider
         startSampleLocation = ConvertBSTToSamples(tokens(0), reader.WaveFormat) - insertOffset
         endSampleLocation = ConvertBSTToSamples(tokens(2), reader.WaveFormat) - insertOffset
 
+        Console.WriteLine("Start: {0}, End: {1}", startSampleLocation, endSampleLocation)
+
         Dim currentInsertPosition As Integer = startSampleLocation
 
         If left Is Nothing Then
@@ -255,16 +259,11 @@ Public Class FragmentWaveProvider
 
         Dim bufferPosition As Long = 0
 
-        If currentInsertPosition < 0 Then
-            currentInsertPosition = 0
-        End If
-
         While reader.HasData(2) And currentInsertPosition < endSampleLocation
             reader.Read(buffer, 0, 2)
             If currentInsertPosition < 0 Then
                 ' Skip
-            End If
-            If currentInsertPosition < left.Count Then
+            ElseIf currentInsertPosition < left.Count Then
                 left(currentInsertPosition) = buffer(0)
                 right(currentInsertPosition) = buffer(1)
             Else
@@ -314,7 +313,7 @@ Public Class FragmentWaveProvider
         readPos = Position
 
         ' Trigger realloc
-        If Position > 1000000 Then
+        If Position > 882000 Then
             left.RemoveRange(0, Position)
             right.RemoveRange(0, Position)
             insertOffset += Position
